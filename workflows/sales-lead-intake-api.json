@@ -1,0 +1,292 @@
+{
+  "name": "[Sales] - Lead Intake API",
+  "nodes": [
+    {
+      "id": "3f9502ac-650f-4123-ac34-890032215008",
+      "name": "Receive Lead",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.2,
+      "position": [
+        0,
+        200
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "lead-intake",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "webhookId": "51bc29f8-43cb-4407-9ff2-7f2c2bfb3fb1"
+    },
+    {
+      "id": "b8024490-0404-4881-be36-4f3cdfd2cddd",
+      "name": "Validate Payload",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        240,
+        200
+      ],
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": false,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "7304f7ec-6c17-4704-a505-ac45c06bde2f",
+              "name": "name",
+              "value": "={{ ($json.body?.name || '').toString().trim() }}",
+              "type": "string"
+            },
+            {
+              "id": "4a71c948-2e34-47a9-a26b-b99e265b5907",
+              "name": "email",
+              "value": "={{ ($json.body?.email || '').toString().trim().toLowerCase() }}",
+              "type": "string"
+            },
+            {
+              "id": "d647a466-ef4e-4e5a-9908-55f2f6397a8f",
+              "name": "company",
+              "value": "={{ ($json.body?.company || '').toString().trim() }}",
+              "type": "string"
+            },
+            {
+              "id": "b380de36-7d14-47da-8ab2-47eb9ba26bbf",
+              "name": "message",
+              "value": "={{ ($json.body?.message || '').toString().trim().slice(0, 2000) }}",
+              "type": "string"
+            },
+            {
+              "id": "8eb45735-fb7d-412a-9391-61bf2c070d2c",
+              "name": "receivedAt",
+              "value": "={{ $now.toISO() }}",
+              "type": "string"
+            },
+            {
+              "id": "e3398a59-3317-4135-844b-6afa3d10f6cb",
+              "name": "valid",
+              "value": "={{ !!($json.body?.name || '').toString().trim() && /^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/.test(($json.body?.email || '').toString().trim()) }}",
+              "type": "boolean"
+            },
+            {
+              "id": "45e33ced-d897-44bd-9141-a81df022326a",
+              "name": "validationError",
+              "value": "={{ !($json.body?.name || '').toString().trim() ? 'name is required' : (!/^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/.test(($json.body?.email || '').toString().trim()) ? 'a valid email is required' : '') }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "48b14115-c5e1-46a6-9430-fab62ce9adfe",
+      "name": "Is Payload Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        480,
+        200
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "b25b0339-2519-482f-ad92-3183b9dbb0ce",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "f6a0bc52-9dbe-4ed6-83fb-eee1219c1db6",
+      "name": "Save Lead to Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        740,
+        100
+      ],
+      "parameters": {
+        "resource": "sheet",
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_SPREADSHEET_ID"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Leads"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "email": "={{ $json.email }}",
+            "name": "={{ $json.name }}",
+            "company": "={{ $json.company }}",
+            "message": "={{ $json.message }}",
+            "receivedAt": "={{ $json.receivedAt }}"
+          },
+          "matchingColumns": [
+            "email"
+          ],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "onError": "continueErrorOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "id": "4bae3bbe-498b-4370-b722-a8caea0290df",
+      "name": "Respond Created",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1000,
+        20
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { status: 'ok', message: 'Lead saved', email: $('Validate Payload').item.json.email } }}",
+        "options": {
+          "responseCode": 201
+        }
+      }
+    },
+    {
+      "id": "0778f885-9bf6-4266-af99-9fccfef46813",
+      "name": "Respond Invalid Payload",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        740,
+        320
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { error: 'validation_error', message: $json.validationError, required: ['name','email'] } }}",
+        "options": {
+          "responseCode": 400
+        }
+      }
+    },
+    {
+      "id": "47884c36-1c64-4343-b8a3-1e7b11baf483",
+      "name": "Respond Server Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1000,
+        200
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { error: 'upstream_error', message: 'Could not save the lead. Please retry shortly.' } }}",
+        "options": {
+          "responseCode": 502
+        }
+      }
+    },
+    {
+      "id": "0310af5d-9a94-4734-8d0f-3fd38f3bc736",
+      "name": "Note - Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -20,
+        -180
+      ],
+      "parameters": {
+        "width": 760,
+        "height": 240,
+        "content": "## Lead Intake API\nPOST /webhook/lead-intake with header auth.\nBody: `{ name, email, company?, message? }`\n\n- **400** invalid payload (checked before any work)\n- **201** saved. Upsert on `email`, so re-sends never create duplicates (idempotent)\n- **502** Google Sheets failed after 3 retries (error output wired)\n\nSetup: create Header Auth credential on the webhook, connect Google Sheets, set the sheet ID and a `Leads` tab with columns: email, name, company, message, receivedAt.\nUnexpected failures are caught by the `[Ops] - Error Alert` workflow."
+      }
+    }
+  ],
+  "connections": {
+    "Receive Lead": {
+      "main": [
+        [
+          {
+            "node": "Validate Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Payload": {
+      "main": [
+        [
+          {
+            "node": "Is Payload Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Payload Valid?": {
+      "main": [
+        [
+          {
+            "node": "Save Lead to Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Invalid Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Lead to Sheet": {
+      "main": [
+        [
+          {
+            "node": "Respond Created",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Server Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

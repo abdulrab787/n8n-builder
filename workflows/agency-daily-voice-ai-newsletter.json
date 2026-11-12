@@ -1,0 +1,190 @@
+{
+  "name": "[Agency] - Daily Voice AI Research Newsletter (Free)",
+  "nodes": [
+    {
+      "id": "7a2d3b20-2c8f-4d66-8b12-1e8c4f6b2001",
+      "name": "Every Morning 7AM",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [0, 0],
+      "parameters": {
+        "rule": {
+          "interval": [
+            { "field": "days", "daysInterval": 1, "triggerAtHour": 7, "triggerAtMinute": 0 }
+          ]
+        }
+      }
+    },
+    {
+      "id": "7a2d3b20-2c8f-4d66-8b12-1e8c4f6b2002",
+      "name": "Feed List",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [240, 0],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Free news sources: Google News RSS searches, Hacker News search RSS, and a few vendor/industry blogs.\n// Edit this list to add or remove topics. One item per feed.\nconst gn = (q) => 'https://news.google.com/rss/search?q=' + encodeURIComponent(q) + '&hl=en-US&gl=US&ceid=US:en';\n\nconst feeds = [\n  { name: 'GN voice agents', url: gn('\"voice agent\" OR \"voice AI\" OR \"AI voice agent\" when:2d') },\n  { name: 'GN voice platforms', url: gn('Vapi OR \"Retell AI\" OR ElevenLabs OR \"Bland AI\" OR Synthflow OR Deepgram OR Cartesia OR LiveKit when:3d') },\n  { name: 'GN speech models', url: gn('\"speech-to-speech\" OR \"realtime API\" OR \"text-to-speech\" OR \"speech recognition\" AI when:3d') },\n  { name: 'GN automation', url: gn('n8n OR \"AI automation\" OR \"AI agents\" OR \"agentic AI\" when:2d') },\n  { name: 'GN regulation', url: gn('\"AI voice\" OR \"AI calls\" OR robocall TCPA OR FCC AI when:7d') },\n  { name: 'HN voice', url: 'https://hnrss.org/newest?q=voice+agent+OR+%22voice+AI%22+OR+text-to-speech&points=15' },\n  { name: 'HN automation', url: 'https://hnrss.org/newest?q=n8n+OR+%22AI+agents%22&points=40' },\n  { name: 'n8n blog', url: 'https://blog.n8n.io/rss/' },\n  { name: 'OpenAI news', url: 'https://openai.com/news/rss.xml' },\n  { name: 'TechCrunch AI', url: 'https://techcrunch.com/category/artificial-intelligence/feed/' }\n];\n\nreturn feeds.map(f => ({ json: f }));"
+      }
+    },
+    {
+      "id": "7a2d3b20-2c8f-4d66-8b12-1e8c4f6b2003",
+      "name": "Read Feed",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2,
+      "position": [480, 0],
+      "parameters": {
+        "url": "={{ $json.url }}",
+        "options": {}
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000
+    },
+    {
+      "id": "7a2d3b20-2c8f-4d66-8b12-1e8c4f6b2004",
+      "name": "Build Digest",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [720, 0],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Keep recent items only, dedupe by title, cap the list, and flatten to text for the LLM.\nconst MAX_AGE_HOURS = 72;\nconst MAX_ITEMS = 60;\nconst cutoff = Date.now() - MAX_AGE_HOURS * 3600 * 1000;\n\nconst seen = new Set();\nconst rows = [];\n\nfor (const it of $input.all()) {\n  const j = it.json;\n  if (!j.title || !j.link) continue; // skips feeds that errored\n  const t = new Date(j.isoDate || j.pubDate || 0).getTime();\n  if (t && t < cutoff) continue;\n  const key = j.title.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().slice(0, 80);\n  if (seen.has(key)) continue;\n  seen.add(key);\n  const snippet = String(j.contentSnippet || j.content || '').replace(/\\s+/g, ' ').trim().slice(0, 220);\n  rows.push({ t, title: j.title.trim(), link: j.link, snippet });\n}\n\nrows.sort((a, b) => b.t - a.t);\nconst top = rows.slice(0, MAX_ITEMS);\n\nconst digest = top\n  .map((r, i) => (i + 1) + '. ' + r.title + '\\n   URL: ' + r.link + (r.snippet ? '\\n   Note: ' + r.snippet : ''))\n  .join('\\n');\n\nif (!top.length) {\n  throw new Error('No recent items found in any feed. Check the Feed List node.');\n}\n\nreturn [{ json: { digest, count: top.length } }];"
+      }
+    },
+    {
+      "id": "7a2d3b20-2c8f-4d66-8b12-1e8c4f6b2005",
+      "name": "Research Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [960, 0],
+      "parameters": {
+        "promptType": "define",
+        "text": "=Today is {{ $now.format('DDDD') }}.\n\nHere are {{ $('Build Digest').item.json.count }} headlines collected from the last 72 hours:\n\n{{ $('Build Digest').item.json.digest }}\n\nProduce the research brief now.",
+        "options": {
+          "systemMessage": "You are a research analyst for an AI automation agency that specializes in VOICE AGENTS (AI phone and voice assistants for businesses).\n\nYou are given a numbered list of recent headlines with URLs. Turn them into a sharp research brief for the agency owner.\n\nRules:\n- Use ONLY the items provided. Never invent facts, companies, numbers or URLs. Copy URLs exactly as given.\n- Discard irrelevant, duplicate or low-value items. Keep the 8-12 that matter most to a voice-agent / AI-automation agency (platform launches and pricing, speech and voice models, agent and automation tooling, funding and market moves, regulation such as TCPA and AI call disclosure, major AI model news).\n- Order by importance. Group under these headings, skipping empty ones: Voice Agent Platforms & Tools, Models & Tech, Automation & Agents, Market & Business, Regulation & Compliance.\n- For each item write: a clear headline, a 2 sentence factual summary based on the headline and note, and the URL.\n- For the top 5 items add one line starting 'Why it matters:' explaining the impact on a voice-agent agency (sales angle, new capability, risk, or cost).\n- Finish with 'Agency opportunities:' listing 2-3 concrete ideas (service to offer, demo to build, client segment to pitch) drawn from today's news.\n- If the news is thin, say so honestly and keep the brief short.\n- Output plain markdown. No HTML.",
+          "maxIterations": 5
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 15000
+    },
+    {
+      "id": "7a2d3b20-2c8f-4d66-8b12-1e8c4f6b2006",
+      "name": "Research Model (Free)",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [900, 220],
+      "parameters": {
+        "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
+        "options": { "temperature": 0.3 }
+      }
+    },
+    {
+      "id": "7a2d3b20-2c8f-4d66-8b12-1e8c4f6b2007",
+      "name": "Newsletter Writer Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [1240, 0],
+      "parameters": {
+        "promptType": "define",
+        "text": "=Today is {{ $now.format('DDDD') }}.\n\nResearch brief to turn into the newsletter:\n\n{{ $('Research Agent').item.json.output }}\n\nWrite the newsletter HTML now.",
+        "options": {
+          "systemMessage": "You are the editor of 'The Voice AI Daily', a morning briefing for the owner of an AI automation agency that builds voice agents.\n\nConvert the research brief into an HTML email by filling in the TEMPLATE below. Keep the template's structure and inline styles exactly; repeat the SECTION and ITEM blocks as needed.\n\nHard rules:\n- Output ONLY the raw HTML, starting with <!DOCTYPE html>. No markdown, no code fences, no text before or after.\n- Replace SUBJECT in <title> with a punchy subject line (max 60 characters) naming the biggest story.\n- Use ONLY items and URLs from the brief. Never invent links or facts. Every item keeps its exact URL.\n- First item of the brief becomes the TOP STORY card. Skip sections that have no items.\n- Keep summaries to 1-3 sentences. Put 'Why it matters' lines in the item when the brief has them.\n- Use single quotes for HTML attributes. No JavaScript, no <style> blocks, no external images.\n\nTEMPLATE:\n<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>SUBJECT</title></head><body style='margin:0;padding:0;background:#f3f4f6;font-family:Arial,Helvetica,sans-serif;color:#1f2937'><table width='100%' cellpadding='0' cellspacing='0' style='background:#f3f4f6'><tr><td align='center' style='padding:24px 12px'><table width='640' cellpadding='0' cellspacing='0' style='max-width:640px;width:100%;background:#ffffff;border-radius:12px;overflow:hidden'>\n<tr><td style='background:#0f172a;color:#ffffff;padding:28px 32px'><div style='font-size:12px;letter-spacing:2px;color:#38bdf8'>THE VOICE AI DAILY</div><div style='font-size:22px;font-weight:bold;margin-top:6px'>TODAY'S DATE</div></td></tr>\n<tr><td style='padding:24px 32px 8px'><div style='background:#eff6ff;border-left:4px solid #2563eb;padding:16px 18px;border-radius:6px'><div style='font-size:11px;letter-spacing:1px;color:#2563eb;font-weight:bold'>TOP STORY</div><div style='font-size:19px;font-weight:bold;margin:6px 0'>HEADLINE</div><div style='font-size:15px;line-height:1.55'>SUMMARY <a href='URL' style='color:#2563eb;font-weight:bold'>Read more &rarr;</a></div></div></td></tr>\n<!-- SECTION: repeat per section -->\n<tr><td style='padding:20px 32px 0'><h2 style='font-size:14px;color:#2563eb;margin:0 0 12px;text-transform:uppercase;letter-spacing:1px;border-bottom:1px solid #e5e7eb;padding-bottom:6px'>SECTION NAME</h2>\n<!-- ITEM: repeat per item -->\n<p style='margin:0 0 16px;font-size:15px;line-height:1.55'><b>HEADLINE</b><br>SUMMARY <i style='color:#475569'>WHY IT MATTERS (optional)</i> <a href='URL' style='color:#2563eb'>Read more &rarr;</a></p>\n</td></tr>\n<!-- OPPORTUNITIES -->\n<tr><td style='padding:20px 32px'><div style='background:#0f172a;color:#e2e8f0;border-radius:8px;padding:18px 20px'><div style='font-size:13px;letter-spacing:1px;color:#38bdf8;font-weight:bold;margin-bottom:8px'>AGENCY OPPORTUNITIES</div><ul style='margin:0;padding-left:18px;font-size:15px;line-height:1.6'><li>IDEA</li></ul></div></td></tr>\n<tr><td style='padding:8px 32px 28px;font-size:12px;color:#94a3b8;text-align:center'>Compiled automatically from public news sources. Verify details before acting.</td></tr>\n</table></td></tr></table></body></html>",
+          "maxIterations": 5
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 15000
+    },
+    {
+      "id": "7a2d3b20-2c8f-4d66-8b12-1e8c4f6b2008",
+      "name": "Writer Model (Free)",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [1180, 220],
+      "parameters": {
+        "model": "nvidia/nemotron-3-super-120b-a12b:free",
+        "options": { "temperature": 0.4 }
+      }
+    },
+    {
+      "id": "7a2d3b20-2c8f-4d66-8b12-1e8c4f6b2009",
+      "name": "Prepare Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1520, 0],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Clean the writer's output into a Gmail-ready subject + HTML body\nlet html = String($input.first().json.output || '')\n  .replace(/^\\s*```(?:html)?\\s*/i, '')\n  .replace(/\\s*```\\s*$/, '')\n  .trim();\n\n// Drop any chatter before the document starts\nconst start = html.search(/<!DOCTYPE html|<html/i);\nif (start > 0) html = html.slice(start);\n\n// Fallback: if the model ignored the format, still deliver the research as readable text\nif (!/<html/i.test(html)) {\n  const brief = String($('Research Agent').item.json.output || html);\n  const esc = brief.replace(/&/g, '&amp;').replace(/</g, '&lt;');\n  html = '<html><head><title>Voice AI Daily</title></head><body style=\"font-family:Arial,sans-serif;max-width:640px;margin:auto;white-space:pre-wrap\">' + esc + '</body></html>';\n}\n\nconst match = html.match(/<title>([\\s\\S]*?)<\\/title>/i);\nlet subject = match ? match[1].trim() : '';\nif (!subject || subject.toUpperCase() === 'SUBJECT') {\n  subject = 'Voice AI Daily - ' + $now.toFormat('LLL d');\n}\n\nreturn [{ json: { subject, html } }];"
+      }
+    },
+    {
+      "id": "7a2d3b20-2c8f-4d66-8b12-1e8c4f6b2010",
+      "name": "Send Newsletter",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [1760, 0],
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "sendTo": "you@example.com",
+        "subject": "={{ $json.subject }}",
+        "emailType": "html",
+        "message": "={{ $json.html }}",
+        "options": { "appendAttribution": false }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "id": "7a2d3b20-2c8f-4d66-8b12-1e8c4f6b2011",
+      "name": "Note - Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-20, -260],
+      "parameters": {
+        "content": "## Daily Voice AI Newsletter (100% free)\n1. 7:00 AM trigger (workflow timezone).\n2. Feed List -> Read Feed pulls free RSS sources (Google News searches, Hacker News, vendor blogs). Edit topics in **Feed List**.\n3. Build Digest keeps the last 72h, dedupes, caps at 60 items.\n4. Research Agent (free OpenRouter model) ranks and summarizes ONLY those items, so every link is real.\n5. Writer Agent (free OpenRouter model) fills an HTML template.\n6. Prepare Email cleans the output, Gmail sends it.\n\nOpenRouter `:free` models need no credits (about 50 requests/day without a balance). If a model is retired, pick another `:free` model in the dropdown.",
+        "height": 240,
+        "width": 760,
+        "color": 4
+      }
+    }
+  ],
+  "connections": {
+    "Every Morning 7AM": {
+      "main": [[{ "node": "Feed List", "type": "main", "index": 0 }]]
+    },
+    "Feed List": {
+      "main": [[{ "node": "Read Feed", "type": "main", "index": 0 }]]
+    },
+    "Read Feed": {
+      "main": [[{ "node": "Build Digest", "type": "main", "index": 0 }]]
+    },
+    "Build Digest": {
+      "main": [[{ "node": "Research Agent", "type": "main", "index": 0 }]]
+    },
+    "Research Model (Free)": {
+      "ai_languageModel": [[{ "node": "Research Agent", "type": "ai_languageModel", "index": 0 }]]
+    },
+    "Research Agent": {
+      "main": [[{ "node": "Newsletter Writer Agent", "type": "main", "index": 0 }]]
+    },
+    "Writer Model (Free)": {
+      "ai_languageModel": [[{ "node": "Newsletter Writer Agent", "type": "ai_languageModel", "index": 0 }]]
+    },
+    "Newsletter Writer Agent": {
+      "main": [[{ "node": "Prepare Email", "type": "main", "index": 0 }]]
+    },
+    "Prepare Email": {
+      "main": [[{ "node": "Send Newsletter", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": { "executionOrder": "v1" }
+}

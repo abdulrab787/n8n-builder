@@ -1,0 +1,193 @@
+{
+  "name": "[Support] - FAQ Chat Agent",
+  "nodes": [
+    {
+      "id": "80c4e256-29ed-4ca3-aa1d-4707ab4ced13",
+      "name": "Chat Entry",
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.5,
+      "position": [
+        0,
+        200
+      ],
+      "parameters": {
+        "public": false,
+        "availableInChat": false,
+        "options": {}
+      },
+      "webhookId": "09e5719c-2866-44b8-9fe1-059a1e84ffe0"
+    },
+    {
+      "id": "252e534a-746d-4077-bd80-9df33ae95463",
+      "name": "Support Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        320,
+        200
+      ],
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.chatInput }}",
+        "options": {
+          "systemMessage": "=You are the support assistant for a small business. Today is {{ $now.format('DDDD') }}.\n\nRules:\n- Answer ONLY from the FAQ returned by the 'Search FAQ sheet' tool. Always call it before answering a product, pricing, policy or how-to question.\n- If the FAQ does not contain the answer, say you are not sure and offer to pass the question to the team. Never invent prices, policies or dates.\n- Only use 'Escalate to support team' after the user agrees, and include their contact email and a clear summary of the issue.\n- Keep replies short, friendly and in plain text.",
+          "maxIterations": 10
+        }
+      }
+    },
+    {
+      "id": "39b61792-e442-4158-8c9e-04caf968ab89",
+      "name": "Chat Model (Free)",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        200,
+        480
+      ],
+      "parameters": {
+        "model": "nvidia/nemotron-3-super-120b-a12b:free",
+        "options": {
+          "temperature": 0.2
+        }
+      }
+    },
+    {
+      "id": "7bf330b8-af37-4805-a588-bfe457baab4a",
+      "name": "Conversation Memory",
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.4,
+      "position": [
+        360,
+        480
+      ],
+      "parameters": {
+        "sessionIdType": "fromInput",
+        "contextWindowLength": 20
+      }
+    },
+    {
+      "id": "e3b82a98-d23d-49e7-8260-713259bbdc0e",
+      "name": "Search FAQ sheet",
+      "type": "n8n-nodes-base.googleSheetsTool",
+      "typeVersion": 4.7,
+      "position": [
+        520,
+        480
+      ],
+      "parameters": {
+        "descriptionType": "manual",
+        "toolDescription": "Returns every row of the company FAQ (columns: question, answer). Call this before answering any product, pricing, policy or how-to question, then answer using only the matching rows. Takes no input.",
+        "resource": "sheet",
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_FAQ_SPREADSHEET_ID"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "FAQ"
+        },
+        "filtersUI": {},
+        "options": {}
+      }
+    },
+    {
+      "id": "584bc3e3-77f3-4b52-a428-498f535b3121",
+      "name": "Escalate to support team",
+      "type": "n8n-nodes-base.gmailTool",
+      "typeVersion": 2.2,
+      "position": [
+        700,
+        480
+      ],
+      "parameters": {
+        "descriptionType": "manual",
+        "toolDescription": "Emails the human support team. Use ONLY after the user agreed to be contacted and gave an email address. Provide a short subject and a message that includes the user's email and a summary of their question.",
+        "resource": "message",
+        "operation": "send",
+        "sendTo": "support@example.com",
+        "subject": "={{ $fromAI('subject', 'Short subject line summarising the user question, max 80 characters', 'string') }}",
+        "emailType": "text",
+        "message": "={{ $fromAI('message', 'Full message for the support team: the user contact email, their question and what was already tried', 'string') }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "96c34475-bb5d-4eac-a627-777f359ddd29",
+      "name": "Note - Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -20,
+        -120
+      ],
+      "parameters": {
+        "width": 720,
+        "height": 260,
+        "content": "## FAQ Support Chat Agent\nChat Trigger -> AI Agent with free OpenRouter model, 20-message memory (keyed by chat session) and two tools:\n- **Search FAQ sheet**: Google Sheets tab `FAQ` with columns `question`, `answer`. The agent answers only from it.\n- **Escalate to support team**: Gmail, recipient fixed in the node (the model cannot change it). Used only after the user agrees.\n\nSetup: connect OpenRouter, Google Sheets and Gmail; set the sheet ID; change `support@example.com`. Chat is private by default; switch the trigger to public only after adding authentication. For stronger safety add a human-approval step before the escalation email."
+      }
+    }
+  ],
+  "connections": {
+    "Chat Entry": {
+      "main": [
+        [
+          {
+            "node": "Support Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chat Model (Free)": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Support Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Conversation Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "Support Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search FAQ sheet": {
+      "ai_tool": [
+        [
+          {
+            "node": "Support Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Escalate to support team": {
+      "ai_tool": [
+        [
+          {
+            "node": "Support Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

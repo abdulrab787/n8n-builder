@@ -1,0 +1,204 @@
+{
+  "name": "Notify: Send Alert",
+  "nodes": [
+    {
+      "id": "1b41a506-1713-4371-bcfc-899c661c22a1",
+      "name": "When Executed by Another Workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "inputSource": "workflowInputs",
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "title",
+              "type": "string"
+            },
+            {
+              "name": "message",
+              "type": "string"
+            },
+            {
+              "name": "severity",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "4dbc2982-032c-485b-8c60-fac749fc551b",
+      "name": "Format Alert",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        240,
+        0
+      ],
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": false,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "7ce87bc4-f9ba-42c8-8021-c451f9c99297",
+              "name": "subject",
+              "value": "=[{{ ($json.severity || 'info').toUpperCase() }}] {{ $json.title }}",
+              "type": "string"
+            },
+            {
+              "id": "82a6b000-92dc-475e-b12b-de5197b2ff6f",
+              "name": "body",
+              "value": "={{ $json.message }}\n\nSent {{ $now.toISO() }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "1eeffce9-3a11-436f-9182-177ddbc4d86f",
+      "name": "Send Alert Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        480,
+        0
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "sendTo": "you@example.com",
+        "subject": "={{ $json.subject }}",
+        "emailType": "text",
+        "message": "={{ $json.body }}",
+        "options": {}
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "31546871-352d-4edd-b489-11307df38e4b",
+      "name": "Return Success",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        720,
+        -60
+      ],
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": false,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "7f64dc51-f6a8-4428-9de0-2b2ec1422e71",
+              "name": "ok",
+              "value": "={{ true }}",
+              "type": "boolean"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "c04cabf6-fc7a-4599-bc35-376d70a50238",
+      "name": "Return Failure",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        720,
+        80
+      ],
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": false,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c66ca4e9-8fbf-428a-b023-5c5a34215775",
+              "name": "ok",
+              "value": "={{ false }}",
+              "type": "boolean"
+            },
+            {
+              "id": "b28bf1a6-c250-4408-82dd-e28d318177f6",
+              "name": "error",
+              "value": "={{ $json.error?.message || 'send failed' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "315f52dd-21ab-4760-b136-4d182eddbbfa",
+      "name": "Note - Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -20,
+        -240
+      ],
+      "parameters": {
+        "width": 620,
+        "height": 180,
+        "content": "## Notify: Send Alert (sub-workflow)\nReusable function. Inputs (typed, Define Below): `title`, `message`, `severity` (info|warning|critical).\nReturns `{ ok: true }` or `{ ok: false, error }`. Expected failures are returned, not thrown, so callers can branch.\nChange the channel here once and every caller follows. Search tip: workflows named `Notify:` are alert senders."
+      }
+    }
+  ],
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Format Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Alert": {
+      "main": [
+        [
+          {
+            "node": "Send Alert Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Alert Email": {
+      "main": [
+        [
+          {
+            "node": "Return Success",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Return Failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
